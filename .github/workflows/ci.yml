@@ -1,0 +1,149 @@
+# nimbu
+# Copyright (c) 2026 Agnish Ghosh
+# Licensed and distributed under either of
+#   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
+#   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
+# at your option. This file may not be copied, modified, or distributed except according to those terms.
+
+# Tuned for GitHub-hosted free-tier runners:
+# - Linux only on push/PR; macOS (10x minute multiplier on private repos) only
+#   on the weekly schedule or a manual run with `macos: true`
+# - the Nim compiler, git submodule objects and nimcache are cached, so a warm
+#   run only recompiles what changed
+# - superseded PR runs are cancelled; every job has a timeout
+
+name: CI
+on:
+  push:
+    branches: [unstable]
+    paths-ignore: ['notes/**', '**/*.md']
+  pull_request:
+    paths-ignore: ['notes/**', '**/*.md']
+  schedule:
+    - cron: '17 3 * * 1' # weekly, also keeps the caches warm
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: 'Also build and test on macOS'
+        type: boolean
+        default: false
+
+concurrency: # Cancel stale PR builds (but not push builds)
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2 # copyright check compares against HEAD^
+
+      - name: Check copyright year
+        run: scripts/check_copyright_year.sh HEAD^
+
+      - name: Check exception tracking
+        run: scripts/check_exception_headers.sh
+
+      - name: Check vendor pins match nimbus-eth2
+        run: |
+          git submodule update --init --depth 1 vendor/nimbus-eth2
+          scripts/sync_vendor.sh --check
+
+  test:
+    name: test (${{ matrix.os }})
+    needs: lint
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.event_name == 'schedule' || inputs.macos) && '["ubuntu-24.04","macos-14"]' || '["ubuntu-24.04"]') }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Environment
+        run: |
+          echo "XDG_CACHE_HOME=${{ runner.temp }}/.nim-cache" >> $GITHUB_ENV
+          if [[ '${{ runner.os }}' == 'macOS' ]]; then
+            echo "NCPU=$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
+            echo "PLATFORM=arm64" >> $GITHUB_ENV
+          else
+            echo "NCPU=$(nproc)" >> $GITHUB_ENV
+            echo "PLATFORM=x64" >> $GITHUB_ENV
+          fi
+          echo "NBS_HASH=$(git rev-parse HEAD:vendor/nimbus-build-system)" >> $GITHUB_ENV
+          echo "VENDOR_HASH=$(git ls-tree -r HEAD vendor | sha256sum | cut -c1-16)" >> $GITHUB_ENV
+
+      # Submodule objects: ~45 repos, the slowest part of a cold run
+      - name: Restore git submodule objects
+        uses: actions/cache@v5
+        with:
+          path: .git/modules
+          key: submodules-${{ env.VENDOR_HASH }}
+          restore-keys: submodules-
+
+      # nimbus-build-system stores the bootstrapped compiler in CI_CACHE
+      - name: Restore Nim compiler
+        uses: actions/cache@v5
+        with:
+          path: NimBinCache
+          key: nim-${{ runner.os }}-${{ env.PLATFORM }}-${{ env.NBS_HASH }}
+
+      - name: Build Nim and dependencies
+        run: |
+          make -j ${NCPU} ARCH_OVERRIDE=${PLATFORM} QUICK_AND_DIRTY_COMPILER=1 CI_CACHE=NimBinCache update
+          ./env.sh nim --version
+
+      # Generated C and objects: generate_makefile only rebuilds changed units
+      - name: Restore nimcache
+        uses: actions/cache@v5
+        with:
+          path: nimcache
+          key: nimcache-${{ runner.os }}-${{ env.VENDOR_HASH }}-${{ hashFiles('nimbu/**', 'tests/**', 'config.nims') }}
+          restore-keys: nimcache-${{ runner.os }}-${{ env.VENDOR_HASH }}-
+
+      - name: Build nimbu
+        run: make -j ${NCPU} V=1 nimbu
+
+      - name: Smoke-run nimbu
+        run: |
+          build/nimbu --version
+          build/nimbu --help > /dev/null
+
+      - name: Run tests
+        run: |
+          make -j ${NCPU} V=1 test TEST_ARGS="--xml=build/test-results.xml --console" 2>&1 | tee build/test-output.txt
+
+      - name: Test summary
+        if: always()
+        run: |
+          {
+            echo "### Tests (${{ matrix.os }})"
+            echo '```'
+            grep -E '^\[Summary\]|\[FAILED\]|^  [^ ].*\.\.\.' build/test-output.txt || echo "no test output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            build/test-results.xml
+            build/test-output.txt
+          retention-days: 14
+          if-no-files-found: ignore

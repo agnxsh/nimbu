@@ -1,0 +1,32 @@
+# nimbu
+# Copyright (c) 2026 Agnish Ghosh
+# Licensed and distributed under either of
+#   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
+#   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
+# at your option. This file may not be copied, modified, or distributed except according to those terms.
+
+nimcache/
+
+# Executables shall be put in an ignored build/ directory
+build/
+
+# Nimble packages and generated build-system state
+/vendor/.nimble
+/nimbus-build-system.paths
+/nimbus-build-system.paths.*
+/.update.timestamp
+
+# Each developer can create a personal .env file with local settings overrides
+.env
+
+# Editors
+.vscode
+/tags
+
+# Runtime artefacts
+*.log
+*.ssz
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+/data/
