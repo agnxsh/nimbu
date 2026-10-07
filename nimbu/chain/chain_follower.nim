@@ -46,6 +46,7 @@ type
   ChainFollowerRef* = ref object
     timeParams: TimeParams
     genesisForkVersion: Version
+    gloasForkEpoch: Epoch
     nodes*: seq[BeaconNodeRef]
     view*: ChainViewRef
     builder*: Opt[BuilderViewRef]
@@ -71,6 +72,7 @@ proc new*(
   ok ChainFollowerRef(
     timeParams: cfg.timeParams,
     genesisForkVersion: cfg.GENESIS_FORK_VERSION,
+    gloasForkEpoch: cfg.GLOAS_FORK_EPOCH,
     nodes: nodes,
     view: ChainViewRef.new(),
     builder: builderPubkey.map(proc(pubkey: ValidatorPubKey): BuilderViewRef =
@@ -239,8 +241,19 @@ proc runSlotLoop(follower: ChainFollowerRef) {.
     if nextSlot > SlotsKept:
       follower.view.prune(nextSlot - SlotsKept)
 
-    if refreshedEpoch != Opt.some(nextSlot.epoch):
-      refreshedEpoch = Opt.some(nextSlot.epoch)
+    let epoch = nextSlot.epoch
+    if nextSlot == epoch.start_slot:
+      if epoch < follower.gloasForkEpoch:
+        info "Waiting for Gloas fork", epoch,
+          gloasForkEpoch = follower.gloasForkEpoch,
+          epochsLeft = follower.gloasForkEpoch - epoch
+      elif epoch == follower.gloasForkEpoch:
+        notice "Gloas fork activated", epoch, slot = nextSlot
+
+    # Builders only exist from Gloas on; beacon nodes reject the query before
+    if epoch >= follower.gloasForkEpoch and
+        refreshedEpoch != Opt.some(epoch):
+      refreshedEpoch = Opt.some(epoch)
       await follower.refreshBuilder(nextSlot)
 
 proc waitForGenesis(follower: ChainFollowerRef): Future[RestGenesis] {.
@@ -269,8 +282,11 @@ proc start*(follower: ChainFollowerRef): Future[Result[void, string]] {.
     return err("Invalid genesis time " & $genesis.genesis_time)
   follower.genesisValidatorsRoot = genesis.genesis_validators_root
 
+  let wallEpoch = follower.clock.get.currentSlot().epoch
   info "Following beacon chain",
     nodes = follower.nodes.mapIt(it.url),
+    gloasForkEpoch = follower.gloasForkEpoch,
+    gloasActive = wallEpoch >= follower.gloasForkEpoch,
     genesisTime = genesis.genesis_time,
     genesisValidatorsRoot = shortLog(genesis.genesis_validators_root),
     wallSlot = follower.clock.get.currentSlot()

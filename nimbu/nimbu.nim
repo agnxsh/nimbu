@@ -51,8 +51,11 @@ proc waitForShutdown() {.async: (raises: [CancelledError]).} =
 
 proc run(config: NimbuConf, cfg: RuntimeConfig) {.
     async: (raises: [CancelledError]).} =
+  let urls = config.beaconNodeUrls().valueOr:
+    fatal "Invalid configuration", reason = error
+    quit QuitFailure
   let follower = ChainFollowerRef.new(
-    cfg, config.beaconNodeUrls(),
+    cfg, urls,
     if config.builderPubkey.isSome:
       Opt.some(config.builderPubkey.get)
     else:

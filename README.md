@@ -21,18 +21,22 @@ design is in [notes/0001-architecture-flow.md](notes/0001-architecture-flow.md).
 The dry run follows the chain and logs what a builder would see. It does
 not build, sign or send anything yet.
 
-**Running it on glamsterdam-devnet-8** (nimbus-eth2 knows this devnet as
-`plataberget`):
+**Running it** against a public beacon node, with `--public-beacon-node`
+(nimbus-eth2 knows glamsterdam-devnet-8 as `plataberget`):
 
 ```sh
 make -j$(nproc) nimbu
-build/nimbu --network=plataberget \
-  --beacon-node=https://beacon.glamsterdam-devnet-8.ethpandaops.io \
-  --log-level='INFO;DEBUG:chain'
+
+# Sepolia
+build/nimbu --network=sepolia --public-beacon-node
+
+# glamsterdam-devnet-8
+build/nimbu --network=plataberget --public-beacon-node --log-level='INFO;DEBUG:chain'
 ```
 
-Add `--builder-pubkey=0x…` to also track a builder's index, balance and
-status every epoch.
+Use `--beacon-node=<url>` (repeatable) for your own beacon node. Add
+`--builder-pubkey=0x…` to also track a builder's index, balance and status
+every epoch.
 
 ![nimbu following glamsterdam-devnet-8](docs/assets/nimbu-devnet-8.png)
 

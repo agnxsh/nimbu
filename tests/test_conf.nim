@@ -26,7 +26,8 @@ suite "Configuration":
       config.logLevel == "INFO"
       config.logFormat == StdoutLogKind.Auto
       config.network == "mainnet"
-      config.beaconNodeUrls() == @[DefaultBeaconNode]
+      config.beaconNodeUrls().get() == @[DefaultBeaconNode]
+      not config.publicBeaconNode
       config.builderPubkey.isNone
 
   test "repeated beacon nodes, builder key and log format":
@@ -34,9 +35,20 @@ suite "Configuration":
       "--beacon-node=http://a:5052", "--beacon-node=http://b:5052",
       "--builder-pubkey=" & pubkeyHex, "--log-format=json")
     check:
-      config.beaconNodeUrls() == @["http://a:5052", "http://b:5052"]
+      config.beaconNodeUrls().get() == @["http://a:5052", "http://b:5052"]
       config.builderPubkey.isSome
       config.logFormat == StdoutLogKind.Json
+
+  test "--public-beacon-node picks the network's public endpoint":
+    check:
+      load("--network=sepolia", "--public-beacon-node").beaconNodeUrls()
+        .get() == @["https://beacon.sepolia.ethpandaops.io"]
+      load("--network=plataberget", "--public-beacon-node",
+           "--beacon-node=http://local:5052").beaconNodeUrls().get() ==
+        @["http://local:5052",
+          "https://beacon.glamsterdam-devnet-8.ethpandaops.io"]
+      load("--network=mainnet", "--public-beacon-node")
+        .beaconNodeUrls().isErr()
 
   test "invalid builder keys are rejected":
     expect CatchableError:

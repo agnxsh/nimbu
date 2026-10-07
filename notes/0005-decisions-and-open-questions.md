@@ -71,6 +71,16 @@ date and rationale. Never delete an entry; mark it superseded instead.
   `chronicles_line_numbers:0` for every build.
 - **Tests:** silent unless `make test TEST_LOG=1`.
 
+### D11 — `--public-beacon-node` for known public endpoints · 2026-10-06 · adopted
+
+- **What it does:** `--public-beacon-node` adds the ethpandaops public beacon
+  node of `--network` (`sepolia`, `plataberget`) to the followed nodes. It is
+  opt-in, so nimbu never silently trusts a third-party node.
+- **Fork awareness:** the follower knows the Gloas fork epoch. It logs
+  "Waiting for Gloas fork" each epoch until then and skips builder lookups,
+  which beacon nodes reject before the fork. Pre-Gloas `payload_attributes`
+  events are skipped by version.
+
 ## Open questions
 
 ### Q1 — Project name and copyright holder · answered 2026-10-06 → D7
@@ -163,3 +173,16 @@ date and rationale. Never delete an entry; mark it superseded instead.
   - Derive the attributes ourselves (they need the parent state's
     withdrawals) and get preferences from gossip, which reopens D1.
 - **Next step:** test against a nimbus BN on the same devnet before M2.
+- **2026-10-06, Sepolia:** the public Sepolia node (also Lighthouse
+  v8.3.0-rc.0) *does* emit `payload_attributes`, at least pre-fork, in the
+  Fulu format. Sometimes no event arrived for 40 s, which suggests a
+  load-balanced pool of nodes with different settings.
+- **2026-10-06, Sepolia across the Gloas fork** (epoch 353,024,
+  13:53:36 UTC), followed for 17 min:
+  - nimbu crossed the fork cleanly.
+  - 4 slots were missed right after the fork, then about 1 every 10 slots.
+    Epoch 353,024 finalized.
+  - Most post-fork payloads were revealed within 1-2 s of the block.
+  - There were still **no** Gloas `payload_attributes`, no
+    `proposer_preferences` and no external bids in the first 80 post-fork
+    slots, so Sepolia has no external builders yet.

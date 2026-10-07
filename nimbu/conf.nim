@@ -20,6 +20,12 @@ export options, confutils, results, crypto, logging
 const
   DefaultBeaconNode* = "http://127.0.0.1:5052"
 
+  PublicBeaconNodes* = [
+    ## Public beacon nodes run by ethpandaops, for `--public-beacon-node`
+    ("sepolia", "https://beacon.sepolia.ethpandaops.io"),
+    ("plataberget", "https://beacon.glamsterdam-devnet-8.ethpandaops.io"),
+  ]
+
 type
   NimbuConf* = object
     logLevel* {.
@@ -46,6 +52,12 @@ type
       defaultValueDesc: DefaultBeaconNode
       name: "beacon-node" .}: seq[string]
 
+    publicBeaconNode* {.
+      desc: "Also follow the public ethpandaops beacon node of --network " &
+            "(sepolia, plataberget)"
+      defaultValue: false
+      name: "public-beacon-node" .}: bool
+
     builderPubkey* {.
       desc: "BLS public key of our builder, used to look up its index and " &
             "balance (optional in the M1 dry run)"
@@ -59,8 +71,20 @@ func parseCmdArg*(
 func completeCmdArg*(T: type ValidatorPubKey, input: string): seq[string] =
   @[]
 
-func beaconNodeUrls*(config: NimbuConf): seq[string] =
-  if config.beaconNodes.len > 0:
-    config.beaconNodes
-  else:
-    @[DefaultBeaconNode]
+func publicBeaconNodeFor*(network: string): Opt[string] =
+  for (name, url) in PublicBeaconNodes:
+    if name == network:
+      return Opt.some(url)
+  Opt.none(string)
+
+func beaconNodeUrls*(config: NimbuConf): Result[seq[string], string] =
+  var urls = config.beaconNodes
+  if config.publicBeaconNode:
+    let url = publicBeaconNodeFor(config.network).valueOr:
+      return err("No known public beacon node for network '" &
+        config.network & "'; pass --beacon-node instead")
+    if url notin urls:
+      urls.add url
+  if urls.len == 0:
+    urls.add DefaultBeaconNode
+  ok urls

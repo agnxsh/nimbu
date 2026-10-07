@@ -23,6 +23,10 @@ type
   # decoded straight into `ref` fields so they are allocated once and shared,
   # never copied, by the caches downstream; small transient ones stay values
   # (notes/0006-coding-standards.md §6).
+  VersionHeader = object
+    ## Just the `version` of a versioned event, the rest is skipped
+    version: string
+
   HeadV2Event = object
     version: string
     data: ref HeadV2ChangeInfoObjectData
@@ -73,7 +77,7 @@ const
     EventTopic.FinalizedCheckpoint}
 
 RestJson.useDefaultSerializationFor(
-  HeadV2Event, PayloadAttributesEvent, ProposerPreferencesEvent,
+  VersionHeader, HeadV2Event, PayloadAttributesEvent, ProposerPreferencesEvent,
   ExecutionPayloadBidEvent)
 
 proc decodeJson[T](data: string, _: typedesc[T]): Result[T, string] =
@@ -104,6 +108,14 @@ proc decodeChainEvent*(
     decodedVersioned(HeadV2Event,
       ChainEventRef(kind: ChainEventKind.Head, head: it))
   of "payload_attributes":
+    # Pre-Gloas attributes have another shape (`parent_block_number`, no
+    # `slot_number`/`target_gas_limit`) and are of no use to a Gloas builder
+    let header = decodeJson(data, VersionHeader).valueOr:
+      return err(topic & ": " & error)
+    let fork = ConsensusFork.init(header.version).valueOr:
+      return err(topic & ": unknown version '" & header.version & "'")
+    if fork < ConsensusFork.Gloas:
+      return ok Opt.none(ChainEventRef)
     decodedVersioned(PayloadAttributesEvent,
       ChainEventRef(kind: ChainEventKind.PayloadAttributes, attributes: it))
   of "proposer_preferences":
